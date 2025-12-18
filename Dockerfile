@@ -27,7 +27,7 @@ COPY rp_handler.py /workspace/Wan2.2/rp_handler.py
 WORKDIR /workspace/Wan2.2
 RUN pip install --upgrade pip
 RUN pip install flash-attn --no-build-isolation
-RUN pip install runpod librosa decord hf_transfer google-cloud-storage
+RUN pip install runpod librosa decord hf_transfer boto3
 RUN pip install transformers peft
 RUN pip install -r requirements.txt
 RUN pip install --upgrade transformers
