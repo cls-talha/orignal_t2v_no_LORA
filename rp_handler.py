@@ -2,7 +2,7 @@ import logging
 import os
 import sys
 import warnings
-from datetime import datetime, timedelta
+from datetime import datetime
 warnings.filterwarnings("ignore")
 
 import json
@@ -12,7 +12,7 @@ import requests
 import torch
 import gc
 import subprocess
-from google.cloud import storage
+import boto3
 from PIL import Image
 
 import wan
@@ -45,30 +45,29 @@ def init_logging(rank):
         logging.basicConfig(level=logging.ERROR)
 
 # ---------------------------
-# GCS FUNCTIONS
+# S3 FUNCTIONS
 # ---------------------------
-def fetch_gcs_json_from_drive(file_id: str) -> dict:
-    url = f"https://drive.google.com/uc?export=download&id={file_id}"
-    r = requests.get(url)
-    r.raise_for_status()
-    return r.json()
+AWS_ACCESS_KEY = os.environ.get("AWS_ACCESS_KEY")
+AWS_SECRET_KEY = os.environ.get("AWS_SECRET_KEY")
+REGION = os.environ.get("AWS_REGION", "us-east-2")
+BUCKET_NAME = os.environ.get("S3_BUCKET_NAME", "runpodstorageforserverless")
 
-def upload_to_gcs_public(source_file, bucket_name="runpod_bucket_testing"):
-    gcs_json_dict = fetch_gcs_json_from_drive("1leNukepERYsBmoKSYTbqUjGb-pQvwQlz")
-    creds_path = "/tmp/gcs_creds.json"
+s3_client = boto3.client(
+    "s3",
+    aws_access_key_id=AWS_ACCESS_KEY,
+    aws_secret_access_key=AWS_SECRET_KEY,
+    region_name=REGION
+)
 
-    with open(creds_path, "w") as f:
-        json.dump(gcs_json_dict, f)
-
-    client = storage.Client.from_service_account_json(creds_path)
-    bucket = client.bucket(bucket_name)
-
-    destination_blob = f"t2v_videos/{uuid.uuid4()}.mp4"
-    blob = bucket.blob(destination_blob)
-
-    blob.upload_from_filename(source_file)
-
-    url = blob.generate_signed_url(expiration=timedelta(hours=1))
+def upload_to_s3_public(local_path, prefix="t2v_videos"):
+    key = f"{prefix}/{uuid.uuid4()}{os.path.splitext(local_path)[1]}"
+    s3_client.upload_file(
+        Filename=local_path,
+        Bucket=BUCKET_NAME,
+        Key=key,
+        ExtraArgs={"ACL": "public-read", "ContentType": "video/mp4"}
+    )
+    url = f"https://{BUCKET_NAME}.s3.{REGION}.amazonaws.com/{key}"
     return url
 
 # ---------------------------
@@ -198,14 +197,14 @@ def handler(event):
     del video
     torch.cuda.synchronize()
 
-    # Upload to GCS
-    gcs_url = upload_to_gcs_public(SAVE_FILE)
-    logging.info(f"Uploaded to GCS: {gcs_url}")
+    # Upload to S3
+    s3_url = upload_to_s3_public(SAVE_FILE)
+    logging.info(f"Uploaded to S3: {s3_url}")
 
     return {
         "status": "success",
         "seed": seed,
-        "gcs_url": gcs_url,
+        "s3_url": s3_url,
         "local_file": SAVE_FILE
     }
 
